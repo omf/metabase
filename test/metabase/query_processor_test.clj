@@ -315,11 +315,11 @@
 (tu/resolve-private-vars metabase.query-processor query-without-aggregations-or-limits?)
 
 ;; query-without-aggregations-or-limits?
-(expect false (query-without-aggregations-or-limits? {:query {:aggregation {:aggregation-type :count}}}))
-(expect true  (query-without-aggregations-or-limits? {:query {:aggregation {:aggregation-type :rows}}}))
-(expect false (query-without-aggregations-or-limits? {:query {:aggregation {:aggregation-type :count}
+(expect false (query-without-aggregations-or-limits? {:query {:aggregation [{:aggregation-type :count}]}}))
+(expect true  (query-without-aggregations-or-limits? {:query {:aggregation [{:aggregation-type :rows}]}}))
+(expect false (query-without-aggregations-or-limits? {:query {:aggregation [{:aggregation-type :count}]
                                                               :limit       10}}))
-(expect false (query-without-aggregations-or-limits? {:query {:aggregation {:aggregation-type :count}
+(expect false (query-without-aggregations-or-limits? {:query {:aggregation [{:aggregation-type :count}]
                                                               :page        1}}))
 
 

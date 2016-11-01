@@ -67,11 +67,11 @@
 
 (defn- query-without-aggregations-or-limits?
   "Is the given query an MBQL query without a `:limit`, `:aggregation`, or `:page` clause?"
-  [{{{ag-type :aggregation-type} :aggregation, :keys [limit page]} :query}]
+  [{{aggregations :aggregation, :keys [limit page]} :query}]
   (and (not limit)
        (not page)
-       (or (not ag-type)
-           (= ag-type :rows))))
+       (or (empty? aggregations)
+           (= (:aggregation-type (first aggregations)) :rows))))
 
 (defn- fail [query, ^Throwable e, & [additional-info]]
   (merge {:status         :failed
@@ -219,9 +219,9 @@
         (update results :rows (partial format-rows settings))))))
 
 
-(defn- should-add-implicit-fields? [{{:keys [fields breakout], {ag-type :aggregation-type} :aggregation} :query, :as query}]
+(defn- should-add-implicit-fields? [{{:keys [fields breakout], aggregations :aggregation} :query, :as query}]
   (and (mbql-query? query)
-       (not (or ag-type
+       (not (or (seq aggregations)
                 (seq breakout)
                 (seq fields)))))
 
@@ -338,33 +338,32 @@
       ;; for non-MBQL queries we do nothing
       (qp query))))
 
+(defn- has-aggregation-of-type?
+  "Does QUERY have any aggregations of AGGREGATION-TYPE?"
+  [aggregation-type {{aggregations :aggregation} :query}]
+  (some (fn [{ag-type :aggregation-type}]
+          (= ag-type aggregation-type))
+        aggregations))
+
+(def ^:private ^{:arglists '([query])} has-cumulative-count?
+  "Does this QUERY have any cumulative count aggregations?"
+  (partial has-aggregation-of-type? :cumulative-count))
 
 (defn- pre-cumulative-count
   "Rewrite queries containing a cumulative count (`cum_count`) aggregation as `count` aggregation queries instead.
-   (Cumulative count is a special case; it is implemented in post-processing).
-
-   Returns a pair like `[is-cumulative-count-query? query]`."
-  [{{{ag-type :aggregation-type} :aggregation, breakout-fields :breakout} :query, :as query}]
-  (let [cum-count?               (= ag-type :cumulative-count)
-        cum-count-with-breakout? (and cum-count?
-                                    (seq breakout-fields))]
-
-    ;; Cumulative count is only applicable if it has breakout field(s)
-    ;; Cumulative counting happens in post-processing
-    (cond
-      ;; If we have breakout field(s), rewrite the query as a "count" aggregation
-      cum-count-with-breakout? [true (assoc-in query [:query :aggregation] {:aggregation-type :count})]
-
-      ;; Cumulative count without any breakout fields should just be treated the same way as "count". Rewrite query as such
-      cum-count? [false (assoc-in query [:query :aggregation] {:aggregation-type :count})]
-
-      ;; Otherwise if this isn't a cumulative count query return it as-is
-      :else [false query])))
+   (Cumulative count is a special case; it is implemented in post-processing)."
+  [{{aggregations :aggregation} :query, :as query}]
+  (update-in query [:query :aggregation] (fn [aggregations]
+                                           (for [{ag-type :aggregation-type, :as ag} aggregations]
+                                             (if-not (= ag-type :cumulative-count)
+                                               ag
+                                               {:aggregation-type :count})))))
 
 
 (defn- post-cumulative-count
   "Cumulative count the values of the aggregate `Field` in RESULTS."
   [{rows :rows, cols :cols, :as results}]
+  ;; TODO - Don't think this handles multiple aggregations correctly
   (let [ ;; Determine the index of the count field; this is what we need to cumulative count
         cum-count-field-index (u/prog1 (u/first-index-satisfying (comp (partial = "count") :name)
                                                                  cols)
@@ -381,14 +380,12 @@
 
 (defn- cumulative-count [qp]
   (fn [query]
-    (if (mbql-query? query)
-      (let [[is-cumulative-count? query] (pre-cumulative-count query)
-            results                      (qp query)]
-        (if is-cumulative-count?
-          (post-cumulative-count results)
-          results))
-      ;; for non-MBQL queries we do nothing
-      (qp query))))
+    (if-not (and (mbql-query? query)
+                 (has-cumulative-count? query))
+      ;; for non-MBQL or non-cumulative count queries we do nothing
+      (qp query)
+      ;; otherwise handle the cumulative count
+      (post-cumulative-count (qp (pre-cumulative-count query))))))
 
 
 (defn- limit
