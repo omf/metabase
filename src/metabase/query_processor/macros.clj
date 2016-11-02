@@ -1,6 +1,7 @@
 (ns metabase.query-processor.macros
   (:require [clojure.core.match :refer [match]]
-            [metabase.db :as db]))
+            [metabase.db :as db]
+            [metabase.util :as u]))
 
 (defn- non-empty-clause? [clause]
   (and clause
@@ -39,6 +40,11 @@
     (seq addtl)       addtl
     :else             []))
 
+(defn- merge-aggregation [aggregations new-ag]
+  (if (map? aggregations)
+    (recur [aggregations] new-ag)
+    (conj aggregations new-ag)))
+
 (defn- merge-aggregations {:style/indent 0} [query-dict [aggregation & more]]
   (if-not aggregation
     ;; no more aggregations? we're done
@@ -52,12 +58,13 @@
                query-dict
                ;; it *is* a metric, insert it into the query appropriately
                (-> query-dict
-                   (update-in [:query :aggregation] conj (:aggregation metric-def))
+                   (update-in [:query :aggregation] merge-aggregation (:aggregation metric-def))
                    (update-in [:query :filter] merge-filter-clauses (:filter metric-def))))
              more))))
 
 (defn- remove-metrics [aggregations]
-  (if-not (every? coll? aggregations)
+  (if-not (and (sequential? aggregations)
+               (every? coll? aggregations))
     (recur [aggregations])
     (vec (for [ag    aggregations
                :when (match ag
@@ -73,7 +80,8 @@
     ;; (since `:aggregation` can be either single or multiple, wrap single ones so `merge-aggregations` can always assume input is multiple)
     (merge-aggregations
       (update-in query-dict [:query :aggregation] remove-metrics)
-      (if (every? coll? aggregations)
+      (if (and (sequential? aggregations)
+               (every? coll? aggregations))
         aggregations
         [aggregations]))))
 
