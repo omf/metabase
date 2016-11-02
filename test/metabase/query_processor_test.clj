@@ -2024,6 +2024,10 @@
             (ql/breakout (ql/expression :x))))))
 
 
+;;; +----------------------------------------------------------------------------------------------------------------------+
+;;; |                                                    MULTIPLE JOINS                                                    |
+;;; +----------------------------------------------------------------------------------------------------------------------+
+
 ;;; CAN WE JOIN AGAINST THE SAME TABLE TWICE (MULTIPLE FKS TO A SINGLE TABLE!?)
 ;; Query should look something like:
 ;; SELECT USERS__via__SENDER_ID.NAME AS NAME, count(*) AS count
@@ -2047,3 +2051,27 @@
               (ql/aggregation (ql/count))
               (ql/breakout $sender_id->users.name)
               (ql/filter (ql/= $reciever_id->users.name "Rasta Toucan")))))))
+
+
+;;; +----------------------------------------------------------------------------------------------------------------------+
+;;; |                                                 MULTIPLE AGGREGATIONS                                                |
+;;; +----------------------------------------------------------------------------------------------------------------------+
+
+;; can we run a simple query with *two* aggregations?
+(expect-with-non-timeseries-dbs
+  [[100 203]]
+  (format-rows-by [int int]
+    (rows (run-query venues
+            (ql/aggregation (ql/count) (ql/sum $price))))))
+
+;; how about with *three* aggregations?
+(expect-with-non-timeseries-dbs
+  [[2.03 100 203]]
+  (format-rows-by [(partial u/round-to-decimals 2) int int]
+    (rows (run-query venues
+            (ql/aggregation (ql/avg $price) (ql/count) (ql/sum $price))))))
+
+;; TODO - w/ cumulative-sum
+;; TODO - w/ cumulative-count
+;; TODO - multiple cumulative sum/count
+;; TODO - multiples of the same type, e.g. :count
